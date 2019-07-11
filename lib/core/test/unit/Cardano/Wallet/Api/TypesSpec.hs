@@ -769,7 +769,7 @@ specification :: Swagger
 specification =
     unsafeDecode bytes
   where
-    bytes = $(makeRelativeToProject "../../specifications/api/swagger.yaml"
+    bytes = $(makeRelativeToProject "./spec/api/swagger.yaml"
         >>= embedFile)
     unsafeDecode =
         either (error . (msg <>) . show) Prelude.id . Yaml.decodeEither'
