@@ -139,7 +139,6 @@ jobs:
   # also compute coverage and documentation. This is also the only way to rebuild
   # an initial default cache and re-inject 3rd-party dependencies like:
   #
-  # - cardano-node-simple
   # - jormungandr
   # - jcli
   #
