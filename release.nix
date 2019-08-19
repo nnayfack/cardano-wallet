@@ -31,7 +31,7 @@ let
       # fixme: fix failing tests
       # collectTests jobs.native.tests ++
       collectTests jobs.native.benchmarks ++
-        jobs.native.cardano-wallet-jormungandr.x86_64-linux
+      [ jobs.native.cardano-wallet-jormungandr.x86_64-linux
         jobs.native.cardano-wallet-jormungandr.x86_64-darwin
       ]
     );
