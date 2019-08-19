@@ -136,7 +136,6 @@ test-suite integration
     , cardano-wallet-cli
     , cardano-wallet-core
     , cardano-wallet-core-integration
-    , cardano-wallet-http-bridge
     , cardano-wallet-jormungandr
     , cardano-wallet-launcher
     , command
