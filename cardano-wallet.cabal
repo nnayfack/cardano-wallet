@@ -23,38 +23,6 @@ flag development
 library
   hs-source-dirs: .
 
-executable cardano-wallet-http-bridge
-  default-language:
-      Haskell2010
-  default-extensions:
-      NoImplicitPrelude
-      OverloadedStrings
-  ghc-options:
-      -threaded -rtsopts
-      -Wall
-      -O2
-  if (!flag(development))
-    ghc-options:
-      -Werror
-  build-depends:
-      base
-    , async
-    , cardano-wallet-cli
-    , cardano-wallet-core
-    , cardano-wallet-http-bridge
-    , cardano-wallet-launcher
-    , filepath
-    , iohk-monitoring
-    , optparse-applicative
-    , process
-    , text
-    , text-class
-    , warp
-  hs-source-dirs:
-      exe/wallet/http-bridge
-  main-is:
-      Main.hs
-
 executable cardano-wallet-jormungandr
   default-language:
       Haskell2010
