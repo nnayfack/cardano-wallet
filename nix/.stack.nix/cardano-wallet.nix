@@ -17,23 +17,6 @@
     components = {
       "library" = {};
       exes = {
-        "cardano-wallet-http-bridge" = {
-          depends = [
-            (hsPkgs.base)
-            (hsPkgs.async)
-            (hsPkgs.cardano-wallet-cli)
-            (hsPkgs.cardano-wallet-core)
-            (hsPkgs.cardano-wallet-http-bridge)
-            (hsPkgs.cardano-wallet-launcher)
-            (hsPkgs.filepath)
-            (hsPkgs.iohk-monitoring)
-            (hsPkgs.optparse-applicative)
-            (hsPkgs.process)
-            (hsPkgs.text)
-            (hsPkgs.text-class)
-            (hsPkgs.warp)
-            ];
-          };
         "cardano-wallet-jormungandr" = {
           depends = [
             (hsPkgs.base)

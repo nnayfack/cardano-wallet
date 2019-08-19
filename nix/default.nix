@@ -8,7 +8,6 @@
 
 # Test dependencies of cardano-wallet
 , cardano-sl-node
-, cardano-http-bridge
 , jormungandr
 
 # Customisations for cross-compiling
@@ -34,7 +33,6 @@ let
         packages.cardano-wallet-core-integration.src = src + /lib/core-integration;
         packages.cardano-wallet-cli.src = src + /lib/cli;
         packages.cardano-wallet-launcher.src = src + /lib/launcher;
-        packages.cardano-wallet-http-bridge.src = src + /lib/http-bridge;
         packages.cardano-wallet-jormungandr.src = src + /lib/jormungandr;
         packages.cardano-wallet-shelley.src = src + /lib/shelley;
         packages.cardano-wallet-test-utils.src = src + /lib/test-utils;
@@ -44,29 +42,10 @@ let
 
       # Add dependencies
       {
-        packages.cardano-wallet-http-bridge.components.tests = {
-          integration.build-tools = [ cardano-http-bridge cardano-sl-node ];
-          unit.build-tools = [ cardano-http-bridge ];
-        };
-
-        # fixme: better way of setting environment variables
-        packages.cardano-wallet-http-bridge.preBuild = "export NETWORK=testnet";
-
         packages.cardano-wallet-jormungandr.components.tests = {
           integration.build-tools = [ jormungandr ];
           unit.build-tools = [ jormungandr ];
         };
-
-        packages.cardano-wallet-http-bridge.components.benchmarks.restore = {
-          build-tools = [ pkgs.makeWrapper ];
-          postInstall = ''
-            makeWrapper \
-              $out/cardano-wallet-*/restore \
-              $out/bin/restore \
-              --prefix PATH : ${cardano-http-bridge}/bin
-          '';
-        };
-        packages.cardano-wallet-http-bridge.components.all.postInstall = pkgs.lib.mkForce "";
       }
 
       # Misc. build fixes for dependencies

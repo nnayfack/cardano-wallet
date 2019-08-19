@@ -10,7 +10,7 @@ haskell.lib.buildStackProject {
   ghc = walletPackages.haskellPackages._config.ghc.package;
 
   buildInputs =
-    (with walletPackages; [ cardano-http-bridge jormungandr cardano-sl-node ]) ++
+    (with walletPackages; [ jormungandr cardano-sl-node ]) ++
     [ zlib gmp ncurses lzma openssl git systemd.dev ] ++
     (lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [ Cocoa CoreServices libcxx libiconv ]));
 

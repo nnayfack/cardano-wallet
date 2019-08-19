@@ -14,23 +14,20 @@ let
   src = iohkLib.cleanSourceHaskell ./.;
 
   inherit (iohkLib.rust-packages.pkgs) jormungandr;
-  cardano-http-bridge = iohkLib.rust-packages.pkgs.callPackage
-    ./nix/cardano-http-bridge.nix { inherit pkgs; };
   cardano-sl-node = import ./nix/cardano-sl-node.nix { inherit pkgs; };
 
   haskellPackages = import ./nix/default.nix {
     inherit pkgs haskell src;
-    inherit cardano-http-bridge cardano-sl-node jormungandr;
+    inherit cardano-sl-node jormungandr;
     inherit (iohkLib.nix-tools) iohk-extras iohk-module;
   };
 
 in {
   inherit pkgs iohkLib src haskellPackages;
-  inherit cardano-http-bridge cardano-sl-node jormungandr;
+  inherit cardano-sl-node jormungandr;
   inherit (haskellPackages.cardano-wallet.identifier) version;
 
   inherit (haskellPackages.cardano-wallet.components.exes)
-    cardano-wallet-http-bridge
     cardano-wallet-jormungandr;
 
   tests = collectComponents "tests" isCardanoWallet haskellPackages;
@@ -44,7 +41,6 @@ in {
       cardano-wallet-launcher
       cardano-wallet-core
       cardano-wallet-core-integration
-      cardano-wallet-http-bridge
       cardano-wallet-jormungandr
       cardano-wallet-shelley
       cardano-wallet-test-utils
@@ -53,7 +49,7 @@ in {
     ];
     buildInputs =
       with pkgs.haskellPackages; [ hlint stylish-haskell weeder ghcid ]
-      ++ [ cardano-http-bridge jormungandr cardano-sl-node pkgs.pkgconfig pkgs.sqlite-interactive ];
+      ++ [ jormungandr cardano-sl-node pkgs.pkgconfig pkgs.sqlite-interactive ];
   };
 
   checks.check-nix-tools = pkgs.callPackage ./nix/check-nix-tools.nix {};
