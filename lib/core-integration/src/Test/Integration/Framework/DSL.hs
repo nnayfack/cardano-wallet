@@ -1220,10 +1220,10 @@ listTransactionsViaCLI ctx args = cardanoWalletCLI @t $ join
 
 -- There is a dependency cycle in the packages.
 --
--- cardano-wallet-launcher depends on cardano-wallet-http-bridge so that it can
--- import the HttpBridge module (resp. with jormungandr).
+-- cardano-wallet-launcher depends on cardano-wallet-jormungandr so that it can
+-- import the Jormungandr module.
 --
--- These packages (cardano-wallet-http-bridge, cardano-wallet-jormungandr) should
+-- These packages (like cardano-wallet-jormungandr) should
 -- have build-tool-depends: cardano-wallet:cardano-wallet-launcher so that it can
 -- run launcher in the tests. But that dependency can't be expressed in the
 -- cabal file, because otherwise there would be a cycle.
