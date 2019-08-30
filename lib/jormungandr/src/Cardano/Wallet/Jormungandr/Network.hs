@@ -38,6 +38,8 @@ module Cardano.Wallet.Jormungandr.Network
 
 import Prelude
 
+import Cardano.BM.Trace
+    ( Trace, appendName, logDebug, logError, logInfo, logNotice )
 import Cardano.Wallet
     ( BlockchainParameters (..) )
 import Cardano.Wallet.Jormungandr.Api
@@ -55,7 +57,8 @@ import Cardano.Wallet.Jormungandr.Compatibility
 import Cardano.Wallet.Jormungandr.Primitive.Types
     ( Tx )
 import Cardano.Wallet.Network
-    ( ErrDecodeExternalTx (..)
+    ( ChainUpdate (..)
+    , ErrDecodeExternalTx (..)
     , ErrGetBlock (..)
     , ErrNetworkTip (..)
     , ErrNetworkUnavailable (..)
@@ -71,20 +74,30 @@ import Cardano.Wallet.Primitive.Types
     )
 import Control.Arrow
     ( left )
+import Control.Concurrent
+    ( threadDelay )
 import Control.Exception
     ( Exception )
 import Control.Monad
-    ( forM, void )
+    ( forM, forever, void )
 import Control.Monad.Catch
     ( throwM )
+import Control.Monad.IO.Class
+    ( MonadIO, liftIO )
 import Control.Monad.Trans.Except
-    ( ExceptT (..), throwE, withExceptT )
+    ( ExceptT (..), runExceptT, throwE, withExceptT )
 import Data.Coerce
     ( coerce )
+import Data.Generics.Internal.VL.Lens
+    ( view, (^.) )
 import Data.Maybe
     ( mapMaybe )
 import Data.Proxy
     ( Proxy (..) )
+import Data.Text
+    ( Text )
+import Fmt
+    ( Buildable, blockListF, pretty, (+|), (+||), (|+), (||+) )
 import Network.HTTP.Client
     ( Manager, defaultManagerSettings, newManager )
 import Network.HTTP.Types.Status
@@ -114,40 +127,21 @@ import qualified Data.Text.Encoding as T
 -- backend target.
 newNetworkLayer
     :: forall n. ()
-    => BaseUrl
-    -> IO (NetworkLayer (Jormungandr n) IO)
-newNetworkLayer url = do
+    => Trace IO Text
+    -> BaseUrl
+    -> IO (NetworkLayer IO (Jormungandr n))
+newNetworkLayer tr url = do
     mgr <- newManager defaultManagerSettings
-    return $ mkNetworkLayer $ mkJormungandrLayer @n mgr url
+    return $ mkNetworkLayer tr $ mkJormungandrLayer @n mgr url
 
 -- | Wrap a Jormungandr client into a 'NetworkLayer' common interface.
 mkNetworkLayer
-    :: Monad m
-    => JormungandrLayer n m
-    -> NetworkLayer (Jormungandr n) m
-mkNetworkLayer j = NetworkLayer
-    { networkTip = do
-        t <- (getTipId j) `mappingError`
-            ErrNetworkTipNetworkUnreachable
-        b <- (getBlock j t) `mappingError` \case
-            ErrGetBlockNotFound _ ->
-                ErrNetworkTipNotFound
-            ErrGetBlockNetworkUnreachable e ->
-                ErrNetworkTipNetworkUnreachable e
-        return $ header b
-
-    , nextBlocks = \tip -> do
-        let count = 10000
-        -- Get the descendants of the tip's /parent/.
-        -- The first descendant is therefore the current tip itself. We need to
-        -- skip it. Hence the 'tail'.
-        ids <- tailOrEmpty <$> getDescendantIds j (prevBlockHash tip) count
-                `mappingError` \case
-            ErrGetDescendantsNetworkUnreachable e ->
-                ErrGetBlockNetworkUnreachable e
-            ErrGetDescendantsParentNotFound _ ->
-                ErrGetBlockNotFound (prevBlockHash tip)
-        forM ids (getBlock j)
+    :: forall m n. (Monad m, MonadSleep m, MonadIO m)
+    => Trace m Text
+    -> JormungandrLayer m n
+    -> NetworkLayer m (Jormungandr n)
+mkNetworkLayer tr j = NetworkLayer
+    { onChainUpdate = forever . flip restoreBlocks
 
     , postTx = postMessage j
 
@@ -168,12 +162,77 @@ mkNetworkLayer j = NetworkLayer
     tailOrEmpty [] = []
     tailOrEmpty (_:xs) = xs
 
+    restoreBlocks cb start = do
+        runExceptT networkTip >>= \case
+            Left e -> do
+                logError tr $ "Failed to get network tip: " +|| e ||+ ""
+                restoreSleep cb start
+            Right tip -> do
+                restoreStep cb (start, tip)
+        return ()
+
+    -- | Wait a short delay before querying for blocks again. We do take this
+    -- opportunity to also refresh the chain tip as it has probably increased
+    -- in order to refine our syncing status.
+    -- restoreSleep :: BlockHeader -> IO ()
+    restoreSleep cb slot = do
+        -- NOTE: Conversion functions will treat 'NominalDiffTime' as
+        -- picoseconds
+        -- let (SlotLength s) = slotLength
+        -- let halfSlotLengthDelay = fromEnum s `div` 2000000
+        let halfSlotLengthDelay = 10000000
+        sleep halfSlotLengthDelay
+        restoreBlocks cb slot
+
+    -- restoreStep :: _ (BlockHeader, BlockHeader) -> IO ()
+    restoreStep cb (slot, tip) = runExceptT (nextBlocks slot) >>= \case
+        Left e -> do
+            logError tr $ "Failed to get next blocks: " +|| e ||+ "."
+            restoreSleep cb slot
+        Right [] -> do
+            logDebug tr "Wallet restored."
+            restoreSleep cb slot
+        Right blocks -> do
+            let next = view #header . last $ blocks
+            logDebug tr $ "Got blocks up to " +|| next ||+ ""
+            cb tip (RollForward blocks)
+            restoreStep cb (next, tip)
+
+    networkTip = do
+        t <- (getTipId j) `mappingError`
+            ErrNetworkTipNetworkUnreachable
+        b <- (getBlock j t) `mappingError` \case
+            ErrGetBlockNotFound _ ->
+                ErrNetworkTipNotFound
+            ErrGetBlockNetworkUnreachable e ->
+                ErrNetworkTipNetworkUnreachable e
+        return $ header b
+
+    nextBlocks tip = do
+        let count = 10000
+        -- Get the descendants of the tip's /parent/.
+        -- The first descendant is therefore the current tip itself. We need to
+        -- skip it. Hence the 'tail'.
+        ids <- tailOrEmpty <$> getDescendantIds j (prevBlockHash tip) count
+                `mappingError` \case
+            ErrGetDescendantsNetworkUnreachable e ->
+                ErrGetBlockNetworkUnreachable e
+            ErrGetDescendantsParentNotFound _ ->
+                ErrGetBlockNotFound (prevBlockHash tip)
+        forM ids (getBlock j)
+
+class Monad m => MonadSleep m where
+    sleep :: Int -> m ()
+
+instance MonadSleep IO where
+    sleep = threadDelay
+
 {-------------------------------------------------------------------------------
                             Jormungandr Client
 -------------------------------------------------------------------------------}
 
 -- | Endpoints of the jormungandr REST API.
-data JormungandrLayer n m = JormungandrLayer
+data JormungandrLayer m n = JormungandrLayer
     { getTipId
         :: ExceptT ErrNetworkUnavailable m (Hash "BlockHeader")
     , getBlock
@@ -212,7 +271,7 @@ data JormungandrLayer n m = JormungandrLayer
 -- Right []
 mkJormungandrLayer
     :: forall n. ()
-    => Manager -> BaseUrl -> JormungandrLayer n IO
+    => Manager -> BaseUrl -> JormungandrLayer IO n
 mkJormungandrLayer mgr baseUrl = JormungandrLayer
     { getTipId = ExceptT $ do
         let ctx = safeLink api (Proxy @GetTipId)

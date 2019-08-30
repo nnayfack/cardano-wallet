@@ -53,7 +53,7 @@ import Prelude hiding
     ( log )
 
 import Cardano.BM.Trace
-    ( Trace, appendName, logDebug, logError, logInfo, logNotice )
+    ( Trace, appendName, logDebug, logInfo, logNotice )
 import Cardano.Wallet.DB
     ( DBLayer
     , ErrNoSuchWallet (..)
@@ -61,7 +61,8 @@ import Cardano.Wallet.DB
     , PrimaryKey (..)
     )
 import Cardano.Wallet.Network
-    ( ErrDecodeExternalTx (..)
+    ( ChainUpdate (..)
+    , ErrDecodeExternalTx (..)
     , ErrNetworkUnavailable (..)
     , ErrPostTx (..)
     , NetworkLayer (..)
@@ -112,7 +113,6 @@ import Cardano.Wallet.Primitive.Types
     ( Address (..)
     , AddressState (..)
     , Block (..)
-    , BlockHeader (..)
     , Coin (..)
     , DefineTx (..)
     , Direction (..)
@@ -153,7 +153,7 @@ import Cardano.Wallet.Unsafe
 import Control.Arrow
     ( first )
 import Control.Concurrent
-    ( ThreadId, forkIO, killThread, threadDelay )
+    ( ThreadId, forkIO, killThread )
 import Control.Concurrent.MVar
     ( MVar, modifyMVar_, newMVar )
 import Control.DeepSeq
@@ -461,7 +461,7 @@ newWalletLayer
     => Trace IO Text
     -> BlockchainParameters t
     -> DBLayer IO s t k
-    -> NetworkLayer t IO
+    -> NetworkLayer IO t
     -> TransactionLayer t k
     -> IO (WalletLayer s t k)
 newWalletLayer tracer bp db nw tl = do
@@ -492,7 +492,7 @@ newWalletLayer tracer bp db nw tl = do
         block0
         _startTime
         feePolicy
-        slotLength
+        _slotLength
         epochLength
         txMaxSize = bp
 
@@ -590,74 +590,32 @@ newWalletLayer tracer bp db nw tl = do
         let workerName = "worker." <> T.take 8 (toText wid)
             t = appendName workerName tracer
         liftIO $ logInfo t $ "Restoring wallet "+| wid |+"..."
-        worker <- liftIO $ forkIO $ do
-            runExceptT (networkTip nw) >>= \case
-                Left e -> do
-                    logError t $ "Failed to get network tip: " +|| e ||+ ""
-                    restoreSleep t wid (currentTip w)
-                Right tip -> do
-                    restoreStep t wid (currentTip w, tip)
+        worker <- liftIO $ forkIO $
+            onChainUpdate nw (currentTip w) $ \tip u -> do
+            runExceptT (restoreStep t wid (tip ^. #slotId)  u) >>= \case
+                Left (ErrNoSuchWallet _) ->
+                    logNotice t "Wallet is gone! Terminating worker..."
+                    -- fixme: exit worker loop
+                Right () -> return ()
         liftIO $ registerWorker re (wid, worker)
 
-    _listUtxoStatistics
-        :: (DefineTx t)
-        => WalletId
-        -> ExceptT ErrListUTxOStatistics IO UTxOStatistics
-    _listUtxoStatistics wid = do
-        (w, _) <- withExceptT
-            ErrListUTxOStatisticsNoSuchWallet (_readWallet wid)
-        let utxo = availableUTxO @s @t w
-        pure $ computeUtxoStatistics log10 utxo
-
-    -- | Infinite restoration loop. We drain the whole available chain and try
-    -- to catch up with the node. In case of error, we log it and wait a bit
-    -- before retrying.
-    --
-    -- The function only terminates if the wallet has disappeared from the DB.
     restoreStep
         :: (DefineTx t)
         => Trace IO Text
         -> WalletId
-        -> (BlockHeader, BlockHeader)
-        -> IO ()
-    restoreStep t wid (slot, tip) = do
-        runExceptT (nextBlocks nw slot) >>= \case
-            Left e -> do
-                logError t $ "Failed to get next blocks: " +|| e ||+ "."
-                restoreSleep t wid slot
-            Right [] -> do
-                logDebug t "Wallet restored."
-                restoreSleep t wid slot
-            Right blocks -> do
-                let next = view #header . last $ blocks
-                runExceptT (restoreBlocks t wid blocks (tip ^. #slotId)) >>=
-                    \case
-                        Left (ErrNoSuchWallet _) ->
-                            logNotice t "Wallet is gone! Terminating worker..."
-                        Right () -> do
-                            restoreStep t wid (next, tip)
-
-    -- | Wait a short delay before querying for blocks again. We do take this
-    -- opportunity to also refresh the chain tip as it has probably increased
-    -- in order to refine our syncing status.
-    restoreSleep
-        :: (DefineTx t)
-        => Trace IO Text
-        -> WalletId
-        -> BlockHeader
-        -> IO ()
-    restoreSleep t wid slot = do
-        -- NOTE: Conversion functions will treat 'NominalDiffTime' as
-        -- picoseconds
-        let (SlotLength s) = slotLength
-        let halfSlotLengthDelay = fromEnum s `div` 2000000
-        threadDelay halfSlotLengthDelay
-        runExceptT (networkTip nw) >>= \case
-            Left e -> do
-                logError t $ "Failed to get network tip: " +|| e ||+ ""
-                restoreSleep t wid slot
-            Right tip ->
-                restoreStep t wid (slot, tip)
+        -> SlotId
+        -> ChainUpdate t
+        -> ExceptT ErrNoSuchWallet IO ()
+    restoreStep t wid tip = \case
+            RollForward [] -> do
+                liftIO $ logInfo t "Wallet restored."
+            RollForward blocks -> do
+                -- let next = view #header . last $ blocks
+                liftIO $ logInfo t $ "Advancing "+|| length blocks ||+ " blocks " -- +|| next +|| ""
+                restoreBlocks t wid blocks tip
+            RollBackward bh -> do
+                liftIO $ logInfo t $ "Rolling back to " +|| bh ||+ "" -- " from " +|| currentTip w ||+ ""
+                -- fixme: unimplemented
 
     -- | Apply the given blocks to the wallet and update the wallet state,
     -- transaction history and corresponding metadata.
@@ -708,6 +666,16 @@ newWalletLayer tracer bp db nw tl = do
             DB.putCheckpoint db (PrimaryKey wid) cp'
             DB.putTxHistory db (PrimaryKey wid) txs
             DB.putWalletMeta db (PrimaryKey wid) meta'
+
+    _listUtxoStatistics
+        :: (DefineTx t)
+        => WalletId
+        -> ExceptT ErrListUTxOStatistics IO UTxOStatistics
+    _listUtxoStatistics wid = do
+        (w, _) <- withExceptT
+            ErrListUTxOStatisticsNoSuchWallet (_readWallet wid)
+        let utxo = availableUTxO @s @t w
+        pure $ computeUtxoStatistics log10 utxo
 
     {---------------------------------------------------------------------------
                                      Addresses

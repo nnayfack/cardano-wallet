@@ -326,12 +326,12 @@ cmdServe = command "serve" $ info (helper <*> cmd) $ mempty
 
         newNetworkLayer
             :: (Switchboard Text, Trace IO Text)
-            -> IO (NetworkLayer t IO, BlockchainParameters t)
+            -> IO (NetworkLayer IO t, BlockchainParameters t)
         newNetworkLayer (sb, tracer) = do
             let url = BaseUrl Http "localhost" (getPort nodePort) "/api"
             mgr <- newManager defaultManagerSettings
             let jor = Jormungandr.mkJormungandrLayer mgr url
-            let nl = Jormungandr.mkNetworkLayer jor
+            let nl = Jormungandr.mkNetworkLayer tracer jor
             waitForService "Jörmungandr" (sb, tracer) nodePort $
                 waitForConnection nl defaultRetryPolicy
             blockchainParams <-

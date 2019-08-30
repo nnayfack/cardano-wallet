@@ -2,12 +2,14 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Cardano.Wallet.Network
     (
     -- * Interface
       NetworkLayer (..)
+    , ChainUpdate (..)
 
     -- * Helpers
     , waitForConnection
@@ -28,7 +30,7 @@ import Cardano.Wallet.Primitive.Types
 import Control.Exception
     ( Exception (..), throwIO )
 import Control.Monad.Trans.Except
-    ( ExceptT, runExceptT )
+    ( ExceptT )
 import Control.Retry
 import Data.ByteString
     ( ByteString )
@@ -37,20 +39,28 @@ import Data.Text
 import GHC.Generics
     ( Generic )
 
-data NetworkLayer t m = NetworkLayer
-    { nextBlocks :: BlockHeader -> ExceptT ErrGetBlock m [Block (Tx t)]
-        -- ^ Gets some blocks from the node. It will not necessarily return all
-        -- the blocks that the node has, but will receive a reasonable-sized
-        -- chunk. It will never return blocks from before the given slot. It
-        -- may return an empty list if the node does not have any blocks from
-        -- after the starting slot.
+-- | A chain update for the wallet.
+data ChainUpdate t
+    = RollForward [Block (Tx t)]
+    -- ^ New blocks to be processed. This will be a non-empty list of blocks, in
+    -- slot order, that are after the current point.
+    | RollBackward BlockHeader
+    -- ^ The network backend tells us to roll back our state to the given point.
+    --
+    -- This may be rolling back further than _k_ blocks (if the node chaindb is
+    -- deleted for example).
+    --
+    -- But the wallet is not required to roll back its state further than _k_,
+    -- nor to apply blocks older than _k_.
 
-    , networkTip
-        :: ExceptT ErrNetworkTip m BlockHeader
-        -- ^ Get the current network tip from the chain producer
+data NetworkLayer m t = NetworkLayer
+    { onChainUpdate :: forall a. BlockHeader -> (BlockHeader -> ChainUpdate t -> m ()) -> m a
+        -- ^ Register a callback for when new blocks arrive after the given
+        -- starting point. The callback will be given the current network tip
+        -- (for reporting progress) and a chain update for the wallet. This
+        -- function never returns.
 
-    , postTx
-        :: (Tx t, [TxWitness]) -> ExceptT ErrPostTx m ()
+    , postTx :: (Tx t, [TxWitness]) -> ExceptT ErrPostTx m ()
         -- ^ Broadcast a transaction to the chain producer
 
     , decodeExternalTx
@@ -105,11 +115,11 @@ instance Exception ErrDecodeExternalTx
 -- | Wait until 'networkTip networkLayer' succeeds according to a given
 -- retry policy. Throws an exception otherwise.
 waitForConnection
-    :: NetworkLayer t IO
+    :: NetworkLayer IO t
     -> RetryPolicyM IO
     -> IO ()
 waitForConnection nw policy = do
-    r <- retrying policy shouldRetry (const $ runExceptT (networkTip nw))
+    r <- retrying policy shouldRetry (const $ pure $ Right ()) -- (const $ runExceptT (networkTip nw))
     case r of
         Right _ -> return ()
         Left e -> throwIO e
