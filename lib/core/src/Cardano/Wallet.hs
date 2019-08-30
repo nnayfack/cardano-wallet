@@ -170,6 +170,8 @@ import Control.Monad.Trans.Maybe
     ( MaybeT (..), maybeToExceptT )
 import Control.Monad.Trans.State
     ( runState, state )
+import Data.Bifoldable
+    ( biconcat )
 import Data.ByteString
     ( ByteString )
 import Data.Coerce
@@ -687,10 +689,11 @@ newWalletLayer tracer bp db nw tl = do
             -- block of the list, even if empty, so that we correctly update the
             -- current tip of the wallet state.
             let nonEmpty = not . null . transactions
-            let (h, q) = first (filter nonEmpty) $
-                    NE.splitAt (length blocks - 1) blocks
-            liftIO $ logDebug t $ pretty (h ++ q)
-            let (txs, cp') = NE.last $ applyBlocks @s @t (h ++ q) cp
+            let nonEmptyBlocks = biconcat
+                    $ first (filter nonEmpty)
+                    $ NE.splitAt (length blocks - 1) blocks
+            liftIO $ logDebug t $ pretty nonEmptyBlocks
+            let (txs, cp') = NE.last $ applyBlocks @s @t nonEmptyBlocks cp
             let progress = slotRatio epochLength sup tip
             let status' = if progress == maxBound
                     then Ready
