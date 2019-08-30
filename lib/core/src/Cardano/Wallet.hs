@@ -688,9 +688,8 @@ newWalletLayer tracer bp db nw tl = do
             -- We only process non-empty blocks, though we still keep the last
             -- block of the list, even if empty, so that we correctly update the
             -- current tip of the wallet state.
-            let nonEmpty = not . null . transactions
             let nonEmptyBlocks = biconcat
-                    $ first (filter nonEmpty)
+                    $ first (filter $ not . null . transactions)
                     $ NE.splitAt (length blocks - 1) blocks
             liftIO $ logDebug t $ pretty nonEmptyBlocks
             let (txs, cp') = NE.last $ applyBlocks @s @t nonEmptyBlocks cp
