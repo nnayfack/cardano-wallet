@@ -622,23 +622,23 @@ newWalletLayer tracer bp db nw tl = do
         -> WalletId
         -> (BlockHeader, BlockHeader)
         -> IO ()
-    restoreStep t wid (slot, tip) = do
-        runExceptT (nextBlocks nw slot) >>= \case
+    restoreStep t wid (localTip, nodeTip) = do
+        runExceptT (nextBlocks nw localTip) >>= \case
             Left e -> do
                 logError t $ "Failed to get next blocks: " +|| e ||+ "."
-                restoreSleep t wid slot
+                restoreSleep t wid localTip
             Right [] -> do
                 logDebug t "Wallet restored."
-                restoreSleep t wid slot
+                restoreSleep t wid localTip
             Right (blockFirst : blocksRest) -> do
                 let blocks = blockFirst :| blocksRest
-                let next = view #header . NE.last $ blocks
-                runExceptT (restoreBlocks t wid blocks (tip ^. #slotId)) >>=
+                let nextLocalTip = view #header . NE.last $ blocks
+                runExceptT (restoreBlocks t wid blocks (nodeTip ^. #slotId)) >>=
                     \case
                         Left (ErrNoSuchWallet _) ->
                             logNotice t "Wallet is gone! Terminating worker..."
                         Right () -> do
-                            restoreStep t wid (next, tip)
+                            restoreStep t wid (nextLocalTip, nodeTip)
 
     -- | Wait a short delay before querying for blocks again. We do take this
     -- opportunity to also refresh the chain tip as it has probably increased
@@ -649,7 +649,7 @@ newWalletLayer tracer bp db nw tl = do
         -> WalletId
         -> BlockHeader
         -> IO ()
-    restoreSleep t wid slot = do
+    restoreSleep t wid localTip = do
         -- NOTE: Conversion functions will treat 'NominalDiffTime' as
         -- picoseconds
         let (SlotLength s) = slotLength
@@ -658,9 +658,9 @@ newWalletLayer tracer bp db nw tl = do
         runExceptT (networkTip nw) >>= \case
             Left e -> do
                 logError t $ "Failed to get network tip: " +|| e ||+ ""
-                restoreSleep t wid slot
-            Right tip ->
-                restoreStep t wid (slot, tip)
+                restoreSleep t wid localTip
+            Right nodeTip ->
+                restoreStep t wid (localTip, nodeTip)
 
     -- | Apply the given blocks to the wallet and update the wallet state,
     -- transaction history and corresponding metadata.
@@ -671,7 +671,7 @@ newWalletLayer tracer bp db nw tl = do
         -> NonEmpty (Block (Tx t))
         -> SlotId -- ^ Network tip
         -> ExceptT ErrNoSuchWallet IO ()
-    restoreBlocks t wid blocks tip = do
+    restoreBlocks t wid blocks nodeTip = do
         let (inf, sup) =
                 ( view #slotId . header . NE.head $ blocks
                 , view #slotId . header . NE.last $ blocks
@@ -693,7 +693,7 @@ newWalletLayer tracer bp db nw tl = do
                     $ NE.splitAt (length blocks - 1) blocks
             liftIO $ logDebug t $ pretty nonEmptyBlocks
             let (txs, cp') = NE.last $ applyBlocks @s @t nonEmptyBlocks cp
-            let progress = slotRatio epochLength sup tip
+            let progress = slotRatio epochLength sup nodeTip
             let status' = if progress == maxBound
                     then Ready
                     else Restoring progress
