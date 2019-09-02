@@ -672,11 +672,12 @@ newWalletLayer tracer bp db nw tl = do
         -> SlotId -- ^ Network tip
         -> ExceptT ErrNoSuchWallet IO ()
     restoreBlocks t wid blocks nodeTip = do
-        let (inf, sup) =
+        let (slotFirst, slotLast) =
                 ( view #slotId . header . NE.head $ blocks
                 , view #slotId . header . NE.last $ blocks
                 )
-        liftIO $ logInfo t $ "Applying blocks ["+| inf |+" ... "+| sup |+"]"
+        liftIO $ logInfo t $
+            "Applying blocks ["+| slotFirst |+" ... "+| slotLast |+"]"
 
         -- NOTE
         -- Not as good as a transaction, but, with the lock, nothing can make
@@ -693,7 +694,7 @@ newWalletLayer tracer bp db nw tl = do
                     $ NE.splitAt (length blocks - 1) blocks
             liftIO $ logDebug t $ pretty nonEmptyBlocks
             let (txs, cp') = NE.last $ applyBlocks @s @t nonEmptyBlocks cp
-            let progress = slotRatio epochLength sup nodeTip
+            let progress = slotRatio epochLength slotLast nodeTip
             let status' = if progress == maxBound
                     then Ready
                     else Restoring progress
