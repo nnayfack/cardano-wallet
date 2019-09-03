@@ -692,7 +692,9 @@ newWalletLayer tracer bp db nw tl = do
             let nonEmptyBlocks = biconcat
                     $ first (filter $ not . null . transactions)
                     $ NE.splitAt (length blocks - 1) blocks
-            let (txs, cp') = NE.last $ applyBlocks @s @t nonEmptyBlocks cp
+            let txs_cp_pairs = applyBlocks @s @t nonEmptyBlocks cp
+            let txs = mconcat $ fst <$> NE.toList txs_cp_pairs
+            let cp' = snd $ NE.last txs_cp_pairs
             let progress = slotRatio epochLength slotLast nodeTip
             let status' =
                     if progress == maxBound

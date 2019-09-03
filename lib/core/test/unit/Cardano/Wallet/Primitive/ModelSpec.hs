@@ -54,8 +54,8 @@ import Control.Monad
     ( foldM )
 import Control.Monad.Trans.State.Strict
     ( State, evalState, runState, state )
-import Data.Bifunctor
-    ( bimap )
+import Data.Foldable
+    ( fold )
 import Data.Maybe
     ( catMaybes )
 import Data.Quantity
@@ -166,7 +166,9 @@ prop_applyBlockTxHistoryIncoming s =
     property (outs (filter isIncoming txs) `overlaps` ourAddresses s')
   where
     cp0 = initWallet @_ @DummyTarget block0 s
-    (txs, s') = bimap Map.elems getState $ NE.last $ applyBlocks blockchain cp0
+    txs_cp_pairs = applyBlocks blockchain cp0
+    txs = Map.elems $ fold $ fst <$> txs_cp_pairs
+    s' = getState $ NE.last $ snd <$> txs_cp_pairs
     isIncoming (_, m) = direction m == Incoming
     outs = Set.fromList . concatMap (map address . outputs . fst)
     overlaps a b
