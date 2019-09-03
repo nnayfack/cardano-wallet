@@ -693,9 +693,7 @@ newWalletLayer tracer bp db nw tl = do
                     $ first (filter $ not . null . transactions)
                     $ NE.splitAt (length blocks - 1) blocks
 
-            let txs_cp_pairs = NE.tail $ applyBlocks @s @t nonEmptyBlocks cp
-
-            forM_ txs_cp_pairs $ \(txs, cp') -> do
+            forM_ (applyBlocks @s @t nonEmptyBlocks cp) $ \(txs, cp') -> do
 
                 let progress = slotRatio epochLength slotLast nodeTip
                 let status' =

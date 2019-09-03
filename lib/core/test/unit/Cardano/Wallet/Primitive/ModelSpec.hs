@@ -57,7 +57,7 @@ import Control.Monad.Trans.State.Strict
 import Data.Foldable
     ( fold )
 import Data.Maybe
-    ( catMaybes )
+    ( catMaybes, fromMaybe )
 import Data.Quantity
     ( Quantity (..) )
 import Data.Set
@@ -168,12 +168,14 @@ prop_applyBlockTxHistoryIncoming s =
     cp0 = initWallet @_ @DummyTarget block0 s
     txs_cp_pairs = applyBlocks blockchain cp0
     txs = Map.elems $ fold $ fst <$> txs_cp_pairs
-    s' = getState $ NE.last $ snd <$> txs_cp_pairs
+    s' = getState $ fromMaybe cp0 $ safeLast $ snd <$> txs_cp_pairs
     isIncoming (_, m) = direction m == Incoming
     outs = Set.fromList . concatMap (map address . outputs . fst)
     overlaps a b
         | a == mempty && b == mempty = True
         | otherwise = not (Set.disjoint a b)
+    safeLast :: [a] -> Maybe a
+    safeLast = fmap NE.last . NE.nonEmpty
 
 -- | Apply blocks move current tip forward
 prop_applyBlockCurrentTip :: ApplyBlock -> Property
