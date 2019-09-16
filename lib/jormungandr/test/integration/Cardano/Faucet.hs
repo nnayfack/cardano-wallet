@@ -33,7 +33,7 @@ block0H :: Hash "Genesis"
 block0H = Hash $ unsafeFromHex (T.encodeUtf8 block0HText)
 
 block0HText :: Text
-block0HText = "657233631a44a0ffc49dfeb645fc2014e6e1de7e150148ff681c6884f1dcf97e"
+block0HText = "fe3296314f338c90844a60bb6be7659f4080d46f6f92c15a2955af90610aac29"
     -- ^ jcli genesis hash --input test/data/jormungandr/block0.bin
 
 mnemonics :: [Mnemonic 15]
