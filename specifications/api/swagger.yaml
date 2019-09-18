@@ -219,6 +219,14 @@ x-transactionId: &transactionId
 x-transactionAmount: &transactionAmount
   <<: *amount
 
+x-epoch: &epoch
+  description: Coins, in Lovelace
+  type: integer
+  minimum: 0
+  maximum: 4294967295 # maxBound @Word32
+  example: 2
+
+
 x-transactionInsertedAt: &transactionInsertedAt
   description: Absolute time the transaction was inserted in a block
   type: object
@@ -330,16 +338,15 @@ x-stakePoolTicker: &stakePoolTicker
 x-stakePoolMetrics: &stakePoolMetrics
   type: object
   required:
+    - epoch
     - controlled_stake
-    - performance
-    - last_blocks
+    - produced_blocks
   properties:
     controlled_stake: *transactionAmount
-    performance:
-      description: Estimated performance computed over the last epoch
-      <<: *percentage
-
-    last_blocks:
+    epoch:
+      <<: *epoch
+      description: The current epoch for which the metrics are collected from
+    produced_blocks:
       <<: *numberOfBlocks
       description: Number of blocks correctly processed during the last epoch
 
@@ -442,14 +449,10 @@ definitions:
     type: object
     required:
       - id
-      - ticker
       - metrics
-      - profit_margin
     properties:
       id: *stakePoolId
-      ticker: *stakePoolTicker
       metrics: *stakePoolMetrics
-      profit_margin: *stakePoolProfitMargin
 
   ApiFee: &ApiFee
     type: object
