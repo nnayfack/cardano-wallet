@@ -4,6 +4,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -38,7 +39,13 @@ module Cardano.Wallet.Primitive.Model
     , updateState
     , applyBlock
     , applyBlocks
+    , newPending
     , unsafeInitWallet
+
+    -- * Making checkpoints
+    , CheckpointDelta(..)
+    , emptyCheckpointDelta
+    , applyBlocks
 
     -- * Accessors
     , currentTip
@@ -75,6 +82,7 @@ import Cardano.Wallet.Primitive.Types
     , excluding
     , restrictedBy
     , txIns
+    , utxoDiff
     )
 import Control.DeepSeq
     ( NFData (..), deepseq )
@@ -108,6 +116,8 @@ import GHC.Generics
     ( Generic )
 import Numeric.Natural
     ( Natural )
+import Safe
+    ( headMay, lastMay )
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
@@ -298,13 +308,69 @@ applyBlock !b (Wallet !u _ s bp) =
 -- * __@(w + bi)@__ is the wallet state after applying block __@bi@__ to wallet
 --   __@w@__.
 --
-applyBlocks
+applyBlocks'
     :: forall s t. (DefineTx t)
     => NonEmpty (Block (Tx t))
     -> Wallet s t
     -> NonEmpty ([(Tx t, TxMeta)], Wallet s t)
-applyBlocks (block0 :| blocks) cp =
+applyBlocks' (block0 :| blocks) cp =
     NE.scanl (flip applyBlock . snd) (applyBlock block0 cp) blocks
+
+{-------------------------------------------------------------------------------
+                               Making checkpoints
+-------------------------------------------------------------------------------}
+
+data CheckpointDelta s t = CheckpointDelta
+    { discoveredTxs :: !(Map (Hash "Tx") (Tx t, TxMeta))
+    -- ^ The transactions found inside the blocks which were applied. Any
+    -- pending transactions in this set are deleted.
+    , addUTxO :: UTxO
+    -- ^ UTxO entries added to the wallet.
+    , removeUTxO :: UTxO
+    -- ^ UTxO entries removed from the wallet.
+    }
+
+emptyCheckpointDelta :: CheckpointDelta s t
+emptyCheckpointDelta = CheckpointDelta mempty mempty mempty
+
+checkpointDiff
+    :: Map (Hash "Tx") (Tx t, TxMeta)
+    -> Wallet s t
+    -> Wallet s t
+    -> CheckpointDelta s t
+checkpointDiff txs (Wallet u _ _ _ _ _) (Wallet u' _ _ _ _ _) =
+    CheckpointDelta { discoveredTxs = txs, addUTxO, removeUTxO }
+  where
+    (addUTxO, removeUTxO) = utxoDiff u u'
+
+-- | Efficient rollback-aware apply blocks. This will coalesce stable
+-- checkpoints, and provide a delta of wallet state so that only the changes
+-- resulting from 'applyBlock' need to be written to storage.
+applyBlocks
+    :: forall s t. (DefineTx t)
+    => Quantity "block" Natural
+    -- ^ Block height of the first unstable block.
+    -> NonEmpty (Block (Tx t))
+    -> Wallet s t
+    -> NonEmpty (CheckpointDelta s t, Wallet s t)
+applyBlocks unstableHeight blocks cp = NE.fromList (stable <> unstable)
+  where
+    -- Create intermediate wallet states from blocks.
+    cps = applyBlocks' blocks cp
+    -- Stable and unstable checkpoints get different treatment.
+    (stable', unstable') =
+        NE.partition ((< unstableHeight) . blockHeight . snd) cps
+    -- Coalesce stable checkpoints into a single diff.
+    stable :: [ (CheckpointDelta s t, Wallet s t)]
+    stable = case lastMay stable' of
+        Nothing -> []
+        Just (_, cp') -> [(checkpointDiff (foldMap fst stable') cp cp', cp')]
+    -- Produce checkpoint diffs for every unstable checkpoint.
+    startCp = maybe cp snd (headMay stable)
+    unstable :: [ (CheckpointDelta s t, Wallet s t)]
+    unstable =
+        [ (checkpointDiff txs prevCp cp', cp')
+        | (prevCp, (txs, cp')) <- zip (startCp:map snd unstable') unstable' ]
 
 {-------------------------------------------------------------------------------
                                    Accessors

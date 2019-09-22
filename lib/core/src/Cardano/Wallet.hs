@@ -145,11 +145,14 @@ import Cardano.Wallet.Primitive.Fee
     )
 import Cardano.Wallet.Primitive.Model
     ( BlockchainParameters (..)
+    , CheckpointDelta (..)
     , Wallet
     , applyBlocks
     , availableUTxO
     , blockchainParameters
     , currentTip
+    , emptyCheckpointDelta
+    , getPending
     , getState
     , initWallet
     , updateState
@@ -205,7 +208,7 @@ import Control.DeepSeq
 import Control.Exception
     ( AsyncException (..), SomeException, asyncExceptionFromException, catch )
 import Control.Monad
-    ( forM, forM_, when )
+    ( forM, forM_ )
 import Control.Monad.IO.Class
     ( MonadIO, liftIO )
 import Control.Monad.Trans.Class
@@ -220,8 +223,6 @@ import Data.ByteString
     ( ByteString )
 import Data.Coerce
     ( coerce )
-import Data.Foldable
-    ( fold )
 import Data.Function
     ( (&) )
 import Data.Functor
@@ -250,6 +251,8 @@ import Data.Time.Clock
     ( UTCTime, getCurrentTime )
 import Data.Word
     ( Word16 )
+import Data.Word
+    ( Word32 )
 import Fmt
     ( Buildable, blockListF, pretty, (+|), (+||), (|+), (||+) )
 import GHC.Exts
@@ -750,7 +753,7 @@ restoreBlocks
     -> NonEmpty (Block (Tx t))
     -> BlockHeader
     -> ExceptT ErrNoSuchWallet IO ()
-restoreBlocks ctx wid blocks nodeTip = do
+restoreBlocks ctx wid blocks (nodeTip, nodeHeight) = do
     let (slotFirst, slotLast) =
             ( view #slotId . header . NE.head $ blocks
             , view #slotId . header . NE.last $ blocks
@@ -764,8 +767,12 @@ restoreBlocks ctx wid blocks nodeTip = do
     DB.withLock db $ do
         (wallet, meta, _) <- readWallet @ctx @s @t @k ctx wid
         let bp = blockchainParameters wallet
-        let (txs0, cps) = NE.unzip $ applyBlocks @s @t blocks wallet
-        let txs = fold txs0
+        -- merge conflicts
+        -- let (txs0, cps) = NE.unzip $ applyBlocks @s @t blocks wallet
+        -- let txs = fold txs0
+        let bhUnstable = unstableBlockHeight (bp ^. #getEpochStability) nodeHeight
+        let cps = applyBlocks @s @t bhUnstable blocks wallet
+        let newTxs = foldMap (discoveredTxs . fst) cps
 
         let calculateMetadata :: SlotId -> WalletMetadata
             calculateMetadata slot = meta { status = status' }
@@ -779,26 +786,13 @@ restoreBlocks ctx wid blocks nodeTip = do
                     then Ready
                     else Restoring progress'
 
-        -- NOTE:
-        -- We cast `k` and `nodeHeight` to 'Integer' since at a given point
-        -- in time, `k` may be greater than the tip.
-        let (Quantity k) = bp ^. #getEpochStability
-        let (Quantity nodeHeight) = nodeTip ^. #blockHeight
-        let bhUnstable :: Integer
-            bhUnstable = fromIntegral nodeHeight - fromIntegral k
-        forM_ (NE.init cps) $ \cp -> do
-            let (Quantity bh) = blockHeight $ currentTip cp
-            when (fromIntegral bh >= bhUnstable) $
-                DB.putCheckpoint db (PrimaryKey wid) cp
-
-        -- NOTE:
-        -- Always store the last checkpoint from the batch and all new
-        -- transactions.
-        let cpLast = NE.last cps
-        let Quantity bhLast = blockHeight $ currentTip cpLast
-        let meta' = calculateMetadata (view #slotId $ currentTip cpLast)
-        DB.putCheckpoint db (PrimaryKey wid) cpLast
-        DB.putTxHistory db (PrimaryKey wid) txs
+        -- NOTE: Updated metadata comes from the last checkpoint.
+        let cpLast = snd $ NE.last cps
+        let Quantity bhLast = blockHeight cpLast
+        let meta' = calculateMetadata (currentTip cpLast ^. #slotId)
+        forM_ (NE.toList cps) $ \(dx, cp) ->
+            DB.putCheckpoint db (PrimaryKey wid) dx cp
+        DB.putTxHistory db (PrimaryKey wid) newTxs
         DB.putWalletMeta db (PrimaryKey wid) meta'
 
         liftIO $ do
@@ -815,6 +809,15 @@ restoreBlocks ctx wid blocks nodeTip = do
   where
     db = ctx ^. dbLayer @s @t @k
     tr = ctx ^. logger
+
+    unstableBlockHeight
+        :: Quantity "block" Word32
+        -- ^ Maximum number of unstable blocks (k).
+        -> Quantity "block" Natural
+        -- ^ Block height of the node's current tip block.
+        -> Quantity "block" Natural
+    unstableBlockHeight (Quantity k) (Quantity h) =
+        Quantity (h - min (fromIntegral k) h)
 
 {-------------------------------------------------------------------------------
                                     Address
@@ -987,7 +990,7 @@ signTx ctx wid pwd (CoinSelection ins outs chgs) =
                     -- Safe because we have a lock and we already fetched the
                     -- wallet within this context.
                     liftIO . unsafeRunExceptT $
-                        DB.putCheckpoint db (PrimaryKey wid) (updateState s' cp)
+                        DB.putCheckpoint db (PrimaryKey wid) emptyCheckpointDelta (updateState s' wal)
                     let amtChng = fromIntegral $
                             sum (getCoin <$> chgs)
                     let amtInps = fromIntegral $
@@ -1019,8 +1022,9 @@ submitTx
     -> ExceptT ErrSubmitTx IO ()
 submitTx ctx wid (tx, meta, wit) = do
     withExceptT ErrSubmitTxNetwork $ postTx nw (tx, wit)
-    DB.withLock db $ withExceptT ErrSubmitTxNoSuchWallet $
-        DB.putTxHistory db (PrimaryKey wid) [(tx, meta)]
+    DB.withLock db $ withExceptT ErrSubmitTxNoSuchWallet $ do
+        (wal, _) <- readWallet @ctx @s @t @k ctx wid
+        DB.putCheckpoint db (PrimaryKey wid) emptyCheckpointDelta (newPending (tx, meta) wal)
   where
     db = ctx ^. dbLayer @s @t @k
     nw = ctx ^. networkLayer @t

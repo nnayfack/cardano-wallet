@@ -24,7 +24,7 @@ import Prelude
 import Cardano.Wallet.Primitive.AddressDerivation
     ( Depth (..), XPrv )
 import Cardano.Wallet.Primitive.Model
-    ( Wallet )
+    ( CheckpointDelta, Wallet )
 import Cardano.Wallet.Primitive.Types
     ( DefineTx (..)
     , Hash
@@ -38,7 +38,6 @@ import Cardano.Wallet.Primitive.Types
     )
 import Control.Monad.Trans.Except
     ( ExceptT, runExceptT )
-
 
 -- | A Database interface for storing various things in a DB. In practice,
 -- we'll need some extra contraints on the wallet state that allows us to
@@ -66,11 +65,12 @@ data DBLayer m s t k = DBLayer
 
     , putCheckpoint
         :: PrimaryKey WalletId
+        -> CheckpointDelta s t
         -> Wallet s t
         -> ExceptT ErrNoSuchWallet m ()
-        -- ^ Replace the current checkpoint for a given wallet. We do not handle
-        -- rollbacks yet, and therefore only stores the latest available
-        -- checkpoint.
+        -- ^ Adds a checkpoint and prunes old checkpoints. The result of
+        -- 'readCheckpoint' will be the latest checkpoint added with
+        -- 'putCheckpoint'.
         --
         -- If the wallet doesn't exist, this operation returns an error.
 
