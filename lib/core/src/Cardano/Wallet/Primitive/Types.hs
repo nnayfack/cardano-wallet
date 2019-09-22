@@ -66,6 +66,7 @@ module Cardano.Wallet.Primitive.Types
     , isSubsetOf
     , restrictedBy
     , restrictedTo
+    , utxoDiff
     , Dom(..)
     , UTxOStatistics (..)
     , HistogramBar (..)
@@ -905,6 +906,13 @@ restrictedBy (UTxO utxo) =
 restrictedTo :: UTxO -> Set TxOut -> UTxO
 restrictedTo (UTxO utxo) outs =
     UTxO $ Map.filter (`Set.member` outs) utxo
+
+-- | @utxoDiff a b@ compares two UTxOs and returns the entries which were added
+-- in @b@ and removed from @a@.
+utxoDiff :: UTxO -> UTxO -> (UTxO, UTxO)
+utxoDiff (UTxO a) (UTxO b) =
+    ( UTxO $ Map.difference b a
+    , UTxO $ Map.difference a b )
 
 data UTxOStatistics = UTxOStatistics
     { histogram :: ![HistogramBar]
