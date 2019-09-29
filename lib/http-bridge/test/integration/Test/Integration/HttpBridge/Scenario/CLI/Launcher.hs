@@ -155,26 +155,6 @@ spec = do
                     TIO.hGetContents o >>= TIO.putStrLn
                     TIO.hGetContents e >>= TIO.putStrLn
 
-    describe "DaedalusIPC" $ do
-        let defaultArgs nodePort =
-                [ commandName @t, "launch", "--node-port", show nodePort ]
-        let tests =
-                [ (const ["--random-port"], " [SERIAL]")
-                , (\fixedPort -> ["--port", fixedPort], "")
-                , (const [], " [SERIAL]")
-                ]
-        forM_ tests $ \(args, tag) -> do
-            let title = "should reply with the port when asked "
-                    <> show (args "FIXED") <> tag
-            it title $ withTempDir $ \d -> do
-                [fixedPort, nodePort] <- randomUnusedTCPPorts 2
-                let filepath = "test/integration/js/mock-daedalus.js"
-                let stateDir = ["--state-dir", d]
-                let scriptArgs = concat
-                        [defaultArgs nodePort, args (show fixedPort), stateDir]
-                (_, _, _, ph) <- createProcess (proc filepath scriptArgs)
-                waitForProcess ph `shouldReturn` ExitSuccess
-
     describe "LOGGING - cardano-wallet launch logging [SERIAL]" $ do
         it "LOGGING - Launch can log --verbose" $ withTempDir $ \d -> do
             pendingWith "See 'LAUNCH - Restoration workers restart'"

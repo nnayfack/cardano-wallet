@@ -77,6 +77,7 @@
             (hsPkgs.bytestring)
             (hsPkgs.cardano-crypto)
             (hsPkgs.cardano-wallet-core)
+            (hsPkgs.cardano-wallet-core-integration)
             (hsPkgs.cardano-wallet-http-bridge)
             (hsPkgs.cborg)
             (hsPkgs.containers)

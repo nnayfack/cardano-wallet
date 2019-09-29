@@ -47,6 +47,7 @@
           (hsPkgs.text)
           (hsPkgs.text-class)
           (hsPkgs.time)
+          (hsPkgs.QuickCheck)
           ];
         };
       };

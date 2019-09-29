@@ -84,6 +84,7 @@
             (hsPkgs.binary)
             (hsPkgs.bytestring)
             (hsPkgs.cardano-wallet-core)
+            (hsPkgs.cardano-wallet-core-integration)
             (hsPkgs.cardano-crypto)
             (hsPkgs.cardano-wallet-jormungandr)
             (hsPkgs.containers)
