@@ -149,6 +149,10 @@
             (hsPkgs.warp)
             (hsPkgs.yaml)
             ];
+          build-tools = [
+            (hsPkgs.buildPackages.nodejs or (pkgs.buildPackages.nodejs))
+            (hsPkgs.buildPackages.cardano-wallet-jormungandr or (pkgs.buildPackages.cardano-wallet-jormungandr))
+            ];
           };
         };
       };

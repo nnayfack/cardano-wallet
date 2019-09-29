@@ -126,6 +126,9 @@
             (hsPkgs.time)
             (hsPkgs.transformers)
             ];
+          build-tools = [
+            (hsPkgs.buildPackages.cardano-wallet-http-bridge or (pkgs.buildPackages.cardano-wallet-http-bridge))
+            ];
           };
         };
       benchmarks = {
