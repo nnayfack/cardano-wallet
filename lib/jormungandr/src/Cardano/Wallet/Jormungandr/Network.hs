@@ -28,6 +28,7 @@ module Cardano.Wallet.Jormungandr.Network
       JormungandrBackend (..)
     , JormungandrConnParams (..)
     , withNetworkLayer
+    , newNetworkLayer
 
     -- * Launching the node backend
     , JormungandrConfig (..)
@@ -70,7 +71,7 @@ import Cardano.Wallet.Jormungandr.Api
     , GetStakeDistribution
     , GetTipId
     , PostMessage
-    , StakeApiResponse
+    , StakeApiResponse (..)
     , api
     )
 import Cardano.Wallet.Jormungandr.Binary
@@ -198,7 +199,7 @@ withNetworkLayer
     -- ^ Logging
     -> JormungandrBackend
     -- ^ How Jörmungandr is started.
-    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx (Block Tx)) -> IO a)
+    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx J.Block) -> IO a)
     -- ^ The action to run. It will be passed the connection parameters used,
     -- and a network layer if startup was successful.
     -> IO a
@@ -210,7 +211,7 @@ withNetworkLayerLaunch
     -- ^ Logging of node startup.
     -> JormungandrConfig
     -- ^ Configuration for starting Jörmungandr.
-    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx (Block Tx)) -> IO a)
+    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx J.Block) -> IO a)
     -- ^ The action to run. It will be passed the connection parameters used,
     -- and a network layer if startup was successful.
     -> IO a
@@ -221,7 +222,7 @@ withNetworkLayerLaunch tr lj action = do
 withNetworkLayerConn
     :: JormungandrConnParams
     -- ^ Parameters for connecting to Jörmungandr node which is already running.
-    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx (Block Tx)) -> IO a)
+    -> (Either ErrStartup (JormungandrConnParams, NetworkLayer IO Tx J.Block) -> IO a)
     -- ^ Action to run with the network layer.
     -> IO a
 withNetworkLayerConn cp@(JormungandrConnParams block0H baseUrl) action =
@@ -235,13 +236,13 @@ withNetworkLayerConn cp@(JormungandrConnParams block0H baseUrl) action =
 newNetworkLayer
     :: BaseUrl
     -> Hash "Genesis"
-    -> ExceptT ErrGetBlockchainParams IO (NetworkLayer IO Tx (Block Tx))
+    -> ExceptT ErrGetBlockchainParams IO (NetworkLayer IO Tx J.Block)
 newNetworkLayer baseUrl block0H = do
     mgr <- liftIO $ newManager defaultManagerSettings
     st <- newMVar emptyBlockHeaders
     let jor = mkJormungandrLayer mgr baseUrl
     g0 <- getInitialBlockchainParameters jor (coerce block0H)
-    return (convertBlock <$> mkRawNetworkLayer g0 st jor)
+    return (mkRawNetworkLayer g0 st jor)
 
 -- | Wrap a Jormungandr client into a 'NetworkLayer' common interface.
 --
