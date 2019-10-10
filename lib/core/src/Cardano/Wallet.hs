@@ -184,11 +184,11 @@ import Cardano.Wallet.Primitive.Types
     , WalletName (..)
     , WalletPassphraseInfo (..)
     , WalletState (..)
+    , blockNoRatio
     , computeUtxoStatistics
     , log10
     , slotDifference
     , slotRangeFromTimeRange
-    , slotRatio
     , slotStartTime
     , wholeRange
     )
@@ -246,6 +246,8 @@ import Fmt
     ( Buildable, blockListF, pretty )
 import GHC.Generics
     ( Generic )
+import Numeric.Natural
+    ( Natural )
 
 import qualified Cardano.Wallet.DB as DB
 import qualified Cardano.Wallet.Primitive.CoinSelection.Random as CoinSelection
@@ -550,13 +552,12 @@ restoreBlocks ctx wid blocks nodeTip = do
         let k = bp ^. #getEpochStability
         let localTip = currentTip $ NE.last cps
 
-        let calculateMetadata :: SlotId -> WalletMetadata
-            calculateMetadata slot = meta { status = status' }
+        let calculateMetadata :: Quantity "block" Natural -> WalletMetadata
+            calculateMetadata block = meta { status = status' }
               where
-                progress' = slotRatio
-                    (bp ^. #getEpochLength)
-                    slot
-                    (nodeTip ^.  #slotId)
+                progress' = blockNoRatio
+                    block
+                    (nodeTip ^. #blockHeight)
                 status' =
                     if progress' == maxBound
                     then Ready
@@ -573,15 +574,15 @@ restoreBlocks ctx wid blocks nodeTip = do
             let (Quantity h) = blockHeight $ currentTip cp
             when (fromIntegral h `elem` unstable) (makeCheckpoint cp)
 
-        let meta' = calculateMetadata (view #slotId localTip)
+        let meta' = calculateMetadata (view #blockHeight localTip)
         makeCheckpoint (NE.last cps) *> DB.prune db (PrimaryKey wid)
         DB.putTxHistory db (PrimaryKey wid) txs
         DB.putWalletMeta db (PrimaryKey wid) meta'
 
-        let slotLast = view #slotId . header . NE.last $ blocks
+        let lastBlockNo = view #blockHeight . header . NE.last $ blocks
         liftIO $ do
             logInfo tr $
-                pretty (calculateMetadata slotLast)
+                pretty (calculateMetadata lastBlockNo)
             logInfo tr $ "discovered "
                 <> pretty (length txs) <> " new transaction(s)"
             logInfo tr $ "local tip: "

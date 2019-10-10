@@ -79,7 +79,7 @@ module Cardano.Wallet.Primitive.Types
     , SlotLength (..)
     , EpochLength (..)
     , StartTime (..)
-    , slotRatio
+    , blockNoRatio
     , flatSlot
     , fromFlatSlot
     , slotStartTime
@@ -1003,20 +1003,17 @@ data SlotParameters = SlotParameters
         :: StartTime
     } deriving (Eq, Generic, Show)
 
--- | Compute the approximate ratio / progress between two slots. This is an
--- approximation for a few reasons, one of them being that we hard code the
+-- | Compute the approximate ratio / progress between two blockNumbers. This is
+-- an approximation for a few reasons, one of them being that we hard code the
 -- epoch length as a static number whereas it may vary in practice.
-slotRatio
-    :: EpochLength
-    -> SlotId
+blockNoRatio
+    :: Quantity "block" Natural
         -- ^ Numerator
-    -> SlotId
+    -> Quantity "block" Natural
         -- ^ Denominator
     -> Quantity "percent" Percentage
-slotRatio epochLength a b =
+blockNoRatio (Quantity n0) (Quantity n1) =
     let
-        n0 = flatSlot epochLength a
-        n1 = flatSlot epochLength b
         tolerance = 5
     in if distance n0 n1 < tolerance || n0 >= n1 then
         maxBound
