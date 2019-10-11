@@ -105,6 +105,8 @@ module Cardano.Wallet.Primitive.Types
 
     -- * Stake Pools
     , PoolId(..)
+    , Stake
+    , EpochNo
     , StakeDistribution (..)
     , poolIdBytesLength
 
@@ -470,6 +472,9 @@ isSubrangeOf r1 r2 =
 {-------------------------------------------------------------------------------
                                   Stake Pools
 -------------------------------------------------------------------------------}
+
+type Stake = Quantity "lovelace" Word64
+type EpochNo = Word64
 
 -- | Represent stake pool identifier.
 --   VRF PubKey: 32 bytes (ristretto25519) which translates to 64 hex character string

@@ -81,13 +81,14 @@ import Cardano.Wallet.Jormungandr.Api.Client
     , getBlockHeader
     , getBlocks
     , getInitialBlockchainParameters
+    , getStakeDistribution
     , getTipId
     , mkJormungandrClient
     , newManager
     , postMessage
     )
 import Cardano.Wallet.Jormungandr.Binary
-    ( convertBlock, runGetOrFail )
+    ( runGetOrFail )
 import Cardano.Wallet.Jormungandr.BlockHeaders
     ( BlockHeaders (..)
     , appendBlockHeaders
@@ -102,8 +103,6 @@ import Cardano.Wallet.Jormungandr.BlockHeaders
     )
 import Cardano.Wallet.Jormungandr.Compatibility
     ( Jormungandr, genConfigFile, localhostBaseUrl )
-import Cardano.Wallet.Jormungandr.Primitive.Types
-    ( Tx )
 import Cardano.Wallet.Network
     ( Cursor, NetworkLayer (..), NextBlocksResult (..), defaultRetryPolicy )
 import Cardano.Wallet.Network.Ports
@@ -111,7 +110,7 @@ import Cardano.Wallet.Network.Ports
 import Cardano.Wallet.Primitive.Model
     ( BlockchainParameters (..) )
 import Cardano.Wallet.Primitive.Types
-    ( Block (..), BlockHeader (..), Hash (..), SlotId (..) )
+    ( BlockHeader (..), Hash (..), SlotId (..) )
 import Control.Concurrent.MVar.Lifted
     ( MVar, modifyMVar, newMVar, readMVar )
 import Control.Exception
@@ -144,6 +143,7 @@ import System.FilePath
 import qualified Cardano.Wallet.Jormungandr.Binary as J
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Char as C
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Yaml as Yaml
 
@@ -260,6 +260,8 @@ mkRawNetworkLayer (block0, bp) st j = NetworkLayer
 
     , staticBlockchainParameters =
         (block0, bp)
+    , stakeDistribution =
+        (\(e, distr) -> (e, Map.fromList distr)) <$> getStakeDistribution j
     }
   where
     -- security parameter, the maximum number of unstable blocks

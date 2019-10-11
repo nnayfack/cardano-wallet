@@ -47,14 +47,17 @@ module Cardano.Wallet.Jormungandr.Api.Client
 import Prelude
 
 import Cardano.Wallet.Jormungandr.Api
-    ( BlockId (..)
+    ( ApiStakeDistribution (pools)
+    , ApiT (..)
+    , BlockId (..)
     , GetBlock
     , GetBlockDescendantIds
     , GetStakeDistribution
     , GetTipId
     , PostMessage
-    , StakeApiResponse
+    , StakeApiResponse (stake)
     , api
+    , epoch
     )
 import Cardano.Wallet.Jormungandr.Binary
     ( ConfigParam (..), Message (..), convertBlock )
@@ -73,8 +76,11 @@ import Cardano.Wallet.Primitive.Model
 import Cardano.Wallet.Primitive.Types
     ( Block (..)
     , BlockHeader (..)
+    , EpochNo
     , Hash (..)
+    , PoolId
     , SlotLength (..)
+    , Stake
     , TxWitness (..)
     )
 import Control.Arrow
@@ -146,7 +152,7 @@ data JormungandrClient m = JormungandrClient
         :: Hash "Genesis"
         -> ExceptT ErrGetBlockchainParams m (J.Block, BlockchainParameters)
     , getStakeDistribution
-        :: ExceptT ErrNetworkUnavailable m StakeApiResponse
+        :: ExceptT ErrNetworkUnavailable m (EpochNo, [(PoolId, Stake)])
     }
 
 -- | Construct a 'JormungandrClient'
@@ -255,7 +261,8 @@ mkJormungandrClient mgr baseUrl = JormungandrClient
 
     , getStakeDistribution = ExceptT $ do
         let ctx = safeLink api (Proxy @GetStakeDistribution)
-        run cGetStakeDistribution >>= defaultHandler ctx
+        let f x = (epoch x, map (\(ApiT k, ApiT v) -> (k,v)) $ pools $ stake x)
+        run (f <$> cGetStakeDistribution) >>= defaultHandler ctx
     }
   where
     run :: ClientM a -> IO (Either ServantError a)
