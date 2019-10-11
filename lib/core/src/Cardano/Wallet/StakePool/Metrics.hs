@@ -3,6 +3,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | This module can fold over a blockchain to collect metrics about
 -- Stake pools.
 --
@@ -45,7 +46,7 @@ import Control.Monad.Trans.Except
 import Data.List.NonEmpty
     ( NonEmpty )
 import Data.Map.Merge.Strict
-    ( SimpleWhenMissing, dropMissing, mapMissing, merge, zipWithMatched )
+    ( WhenMissing, mergeA, traverseMissing, zipWithMatched )
 import Data.Map.Strict
     ( Map )
 import Data.Text
@@ -64,6 +65,11 @@ import qualified Data.Map.Strict as Map
 data ErrListStakePools
     = ErrListStakePoolsStakeIsUnreachable
     | ErrListStakePoolsMetricsIsUnsynced
+    | ErrListStakePoolsInternalError ErrListStakePoolsInternalErr
+
+data ErrListStakePoolsInternalErr
+    = ErrListStakePoolInternalErrInconsistentData
+    | ErrListStakePoolInternalErrReadStateErr
 
 newtype StakePoolLayer m = StakePoolLayer
     { listStakePools
@@ -78,36 +84,44 @@ newStakePoolLayer nl tr = do
     mvar <- worker nl tr
     return $ StakePoolLayer
         { listStakePools = do
-            res <- combineMetrics (withE1 $ stakeDistribution nl) (liftIO $ readMVar mvar)
-            case res of
-                Nothing -> throwE ErrListStakePoolsMetricsIsUnsynced
-                Just r -> return r
+            combineMetrics (withE1 $ stakeDistribution nl) (liftIO $ readMVar mvar)
         }
   where
-    withE1 = withExceptT $ const ErrListStakePoolsStakeIsUnreachable
+    withE1 = withExceptT $ const ()
 
 -- | Combines two different sources of data: stake distribution and pool activity
 -- together.
 combineMetrics
-    :: Monad m
-    => m (EpochNo, Map PoolId Stake)
-    -> m State
-    -> m (Maybe (Map PoolId (Stake, Int)))
+    :: forall m readStateErr stakeDistrErr. Monad m
+    => ExceptT stakeDistrErr m (EpochNo, Map PoolId Stake)
+    -> ExceptT readStateErr m State
+    -> ExceptT ErrListStakePools m (Map PoolId (Stake, Int))
 combineMetrics getStakeDistr getActivityState = do
-    (epoch, distr) <- getStakeDistr
-    s <- getActivityState
-    let m = activityForEpoch epoch s
-    return $ merge
+    (epoch, distr) <- withExceptT (const ErrListStakePoolsStakeIsUnreachable)
+        getStakeDistr
+
+    s <- withInternalErr ErrListStakePoolInternalErrReadStateErr
+        getActivityState
+
+    m <- case activityForEpoch epoch s of
+        Just x -> return x
+        Nothing -> throwE ErrListStakePoolsMetricsIsUnsynced
+    mergeA
         stakeButNoActivity
         activityButNoStake
         (zipWithMatched (\_k stake act -> (stake, act)))
-        distr <$> m
+        distr m
   where
     -- What to do when we only find a pool in one of the two data-sources:
-    stakeButNoActivity :: SimpleWhenMissing k Stake (Stake, Int)
-    stakeButNoActivity = mapMissing $ \_k stake -> (stake, 0)
-    activityButNoStake :: SimpleWhenMissing k Int (Stake, Int)
-    activityButNoStake = dropMissing -- TODO: Probably crash
+    stakeButNoActivity :: WhenMissing (ExceptT ErrListStakePools m) k Stake (Stake, Int)
+    stakeButNoActivity = traverseMissing $ \_k stake -> pure (stake, 0)
+    activityButNoStake :: WhenMissing (ExceptT ErrListStakePools m) k Int (Stake, Int)
+    activityButNoStake = traverseMissing $ \_ _ ->
+        throwE
+        . ErrListStakePoolsInternalError
+        $ ErrListStakePoolInternalErrInconsistentData
+
+    withInternalErr e = withExceptT $ const $ ErrListStakePoolsInternalError e
 
     -- In case we wanted to calculate approximate performance (AP):
     --

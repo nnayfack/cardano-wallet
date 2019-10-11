@@ -1204,11 +1204,18 @@ instance LiftHandler ErrListStakePools where
     handler = \case
         ErrListStakePoolsMetricsIsUnsynced ->
             apiError err400 NotSynced $ mconcat
-                [ "Stakepool metrics are unavailible because I haven't had "
-                , "enough time to sync yet."
+                [ "I can't list stake pools yet because I need to scan the "
+                , "blockchain for metrics first."
                 ]
         ErrListStakePoolsStakeIsUnreachable ->
             apiError err400 StakeIsUnreachable $ mconcat
                 [ "I can't reach the stake distribution from jörmungandr. "
-                , "Maybe jörmungandr is launched in BFT-mode."
+                , "Maybe the jörmungandr is not started, or it is on a BFT "
+                , "blockchain instead of, Praos/Genesis?"
                 ]
+        ErrListStakePoolsInternalError _ ->
+            apiError err500 StakeIsUnreachable $ mconcat
+                [ "Internal error."
+                ]
+
+
