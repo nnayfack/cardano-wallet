@@ -630,10 +630,8 @@ listPools
     :: StakePoolLayer IO
     -> Handler [ApiStakePool]
 listPools spl = do
-    (fmap f) . Map.toList <$> liftHandler (listStakePools spl)
+    (fmap f) <$> liftHandler (listStakePools spl)
   where
-    -- TODO: This is very temporary. More logic should be handled by
-    -- StakePool.Metrics, probably.
     f (k, (s, a)) = ApiStakePool
         (ApiT k)
         (StakePoolMetrics s (Quantity $ fromIntegral a))

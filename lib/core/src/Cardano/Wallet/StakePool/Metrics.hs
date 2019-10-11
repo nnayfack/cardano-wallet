@@ -73,7 +73,7 @@ data ErrListStakePoolsInternalErr
 
 newtype StakePoolLayer m = StakePoolLayer
     { listStakePools
-        :: ExceptT ErrListStakePools m (Map PoolId (Stake, Int))
+        :: ExceptT ErrListStakePools m [(PoolId, (Stake, Int))]
     }
 
 newStakePoolLayer
@@ -83,8 +83,10 @@ newStakePoolLayer
 newStakePoolLayer nl tr = do
     mvar <- worker nl tr
     return $ StakePoolLayer
-        { listStakePools = do
-            combineMetrics (withE1 $ stakeDistribution nl) (liftIO $ readMVar mvar)
+        { listStakePools = Map.toList <$>
+            combineMetrics
+                (withE1 $ stakeDistribution nl)
+                (liftIO $ readMVar mvar)
         }
   where
     withE1 = withExceptT $ const ()
