@@ -90,6 +90,7 @@ import qualified Cardano.BM.Configuration.Model as CM
 import qualified Cardano.Wallet.Api.Server as Server
 import qualified Cardano.Wallet.DB.Sqlite as Sqlite
 import qualified Cardano.Wallet.Jormungandr.Binary as Binary
+import qualified Cardano.Wallet.StakePool.Metrics as SP
 import qualified Data.Text as T
 import qualified Network.Wai.Handler.Warp as Warp
 
@@ -131,19 +132,20 @@ serveWallet (cfg, sb, tr) databaseDir listen lj beforeMainLoop = do
         -> IO ()
     startServer tracer nPort nl wallet = do
         let (_, bp) = staticBlockchainParameters nl
+        spl <- SP.newStakePoolLayer (toSPBlock <$> nl) tracer
         Server.withListeningSocket listen $ \(wPort, socket) -> do
             let tracerIPC = appendName "daedalus-ipc" tracer
             let tracerApi = appendName "api" tracer
             let settings = Warp.defaultSettings
                     & setBeforeMainLoop (beforeMainLoop (Port wPort) nPort bp)
             let ipcServer = daedalusIPC tracerIPC wPort
-            let apiServer = Server.start settings tracerApi socket wallet
+            let apiServer = Server.start settings tracerApi socket wallet spl
             race_ ipcServer apiServer
 
     -- Will be used to connect "Cardano.Wallet.StakePool.Metrics" with
     -- our networkLayer.
-    _toSPBlock :: Binary.Block -> (BlockHeader, PoolId)
-    _toSPBlock b =
+    toSPBlock :: Binary.Block -> (BlockHeader, PoolId)
+    toSPBlock b =
         (convertHeader header, toJust $ Binary.producedBy header)
       where
         header = Binary.header b

@@ -79,7 +79,7 @@ import Cardano.Wallet.Api.Types
     , ApiErrorCode (..)
     , ApiFee (..)
     , ApiMigrateByronWalletData (..)
-    , ApiStakePool
+    , ApiStakePool (..)
     , ApiT (..)
     , ApiTransaction (..)
     , ApiTxId (..)
@@ -91,6 +91,7 @@ import Cardano.Wallet.Api.Types
     , PostExternalTransactionData (..)
     , PostTransactionData
     , PostTransactionFeeData
+    , StakePoolMetrics (..)
     , WalletBalance (..)
     , WalletPostData (..)
     , WalletPutData (..)
@@ -134,6 +135,8 @@ import Cardano.Wallet.Primitive.Types
     )
 import Cardano.Wallet.Registry
     ( HasWorkerCtx (..), MkWorker (..), newWorker, workerResource )
+import Cardano.Wallet.StakePool.Metrics
+    ( ErrListStakePools (..), StakePoolLayer (..) )
 import Cardano.Wallet.Transaction
     ( TransactionLayer )
 import Cardano.Wallet.Unsafe
@@ -249,8 +252,9 @@ start
     -> Trace IO Text
     -> Socket
     -> ctx
+    -> StakePoolLayer IO
     -> IO ()
-start settings trace socket ctx = do
+start settings trace socket ctx spl = do
     logSettings <- newApiLoggerSettings <&> obfuscateKeys (const sensitive)
     Warp.runSettingsSocket settings socket
         $ handleRawError (curry handler)
@@ -259,7 +263,7 @@ start settings trace socket ctx = do
   where
     -- | A Servant server for our wallet API
     server :: Server (Api t)
-    server = coreApiServer ctx :<|> compatibilityApiServer ctx
+    server = coreApiServer ctx spl :<|> compatibilityApiServer ctx
 
     application :: Application
     application = serve (Proxy @("v2" :> Api t)) server
@@ -304,9 +308,10 @@ coreApiServer
         , ctx ~ ApiLayer s t k
         )
     => ctx
+    -> StakePoolLayer IO
     -> Server (CoreApi t)
-coreApiServer ctx =
-    addresses ctx :<|> wallets ctx :<|> transactions ctx :<|> pools ctx
+coreApiServer ctx spl =
+    addresses ctx :<|> wallets ctx :<|> transactions ctx :<|> pools spl
 
 {-------------------------------------------------------------------------------
                                     Wallets
@@ -617,14 +622,21 @@ postTransactionFee ctx (ApiT wid) body = do
 -------------------------------------------------------------------------------}
 
 pools
-    :: ctx
+    :: StakePoolLayer IO
     -> Server StakePools
 pools = listPools
 
 listPools
-    :: ctx
+    :: StakePoolLayer IO
     -> Handler [ApiStakePool]
-listPools _ctx = throwError err501
+listPools spl = do
+    (fmap f) . Map.toList <$> liftHandler (listStakePools spl)
+  where
+    -- TODO: This is very temporary. More logic should be handled by
+    -- StakePool.Metrics, probably.
+    f (k, (s, a)) = ApiStakePool
+        (ApiT k)
+        (StakePoolMetrics s (Quantity $ fromIntegral a))
 
 {-==============================================================================
                             Compatibility API
@@ -1187,3 +1199,16 @@ instance LiftHandler (Request, ServantErr) where
                 , renderHeader $ contentType $ Proxy @JSON
                 ) : headers
             }
+
+instance LiftHandler ErrListStakePools where
+    handler = \case
+        ErrListStakePoolsMetricsIsUnsynced ->
+            apiError err400 NotSynced $ mconcat
+                [ "Stakepool metrics are unavailible because I haven't had "
+                , "enough time to sync yet."
+                ]
+        ErrListStakePoolsStakeIsUnreachable ->
+            apiError err400 StakeIsUnreachable $ mconcat
+                [ "I can't reach the stake distribution from jörmungandr. "
+                , "Maybe jörmungandr is launched in BFT-mode."
+                ]
